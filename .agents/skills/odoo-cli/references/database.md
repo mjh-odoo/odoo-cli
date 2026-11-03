@@ -22,7 +22,7 @@ odoo db list --json
 
 `db restore` 调用官方 `db load --neutralize`，默认中和外发任务。CLI 检查格式、CRC、路径和 20.0 主版本后执行恢复；目标库已存在时默认拒绝。只有用户已明确要求覆盖该目标时使用 `--force`。
 
-恢复到新名字不会自动修改项目 PGDATABASE。用户要切换默认运行库时，修改 `.env` 的 PGDATABASE 并执行 `odoo up --no-build`；不要只 restart，也不要把 `module ... -d` 当成切换项目。
+恢复到新名字不会自动修改项目 PGDATABASE。用户要切换默认运行库时，修改 `.env` 的 PGDATABASE 并执行 `odoo up --no-build`，用 up 明确应用配置；`module ... -d` 只改变本次维护目标，不切换项目默认库。
 
 先保证项目具备存档内已安装模块的兼容源码，再核对记录、模块状态及真实附件下载内容。ZIP 校验和恢复命令通过只能证明对应步骤成功，不代替业务或附件验收。仅恢复可信存档。
 
