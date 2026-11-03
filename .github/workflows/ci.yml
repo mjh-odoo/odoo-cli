@@ -1,0 +1,27 @@
+name: CLI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm test
+      - name: Verify packaged executable
+        shell: bash
+        run: |
+          package=$(npm pack --silent)
+          npm install --prefix "$RUNNER_TEMP/odoo-cli-smoke" --ignore-scripts "./$package"
+          node "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/bin/odoo.mjs" --help
+          node "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/bin/odoo.mjs" --version

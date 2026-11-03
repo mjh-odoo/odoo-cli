@@ -1,0 +1,3 @@
+Copyright (C) 2026 MaJianhang.
+
+The management helpers were extracted from the locally maintained Odoo Community base (commit c901e640). This CLI package does not contain Odoo server source, project configuration, database contents or attachments.
