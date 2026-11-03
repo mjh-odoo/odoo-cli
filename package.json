@@ -23,6 +23,7 @@
     "bin/",
     "src/",
     "docs/",
+    ".agents/skills/odoo-cli/",
     "LICENSE",
     "COPYRIGHT"
   ],

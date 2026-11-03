@@ -25,3 +25,5 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/odoo-cli-smoke" --ignore-scripts "./$package"
           node "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/bin/odoo.mjs" --help
           node "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/bin/odoo.mjs" --version
+          test -f "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/.agents/skills/odoo-cli/SKILL.md"
+          test -f "$RUNNER_TEMP/odoo-cli-smoke/node_modules/@mjh-odoo/cli/.agents/skills/odoo-cli/agents/openai.yaml"
