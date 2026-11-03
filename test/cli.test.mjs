@@ -9,6 +9,7 @@ import { createProgram } from '../src/cli.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const binary = path.join(root, 'bin/odoo.mjs');
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 
 function project(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'odoo cli 中文 '));
@@ -38,7 +39,7 @@ test('all public help pages work outside projects without Docker or creating con
 
 test('CLI version and invalid parameters never initialize a project', t => {
   const dir = project(t);
-  for (const args of [['--version'], ['-V'], ['version']]) assert.equal(launch(args, dir).stdout.trim(), '0.1.0');
+  for (const args of [['--version'], ['-V'], ['version']]) assert.equal(launch(args, dir).stdout.trim(), version);
   for (const args of [['db', 'restore'], ['up', '--wait-timeout', '-1'], ['down', '--unknown'], ['module', 'install'], ['logs', '--tail', 'bad'], ['missing']]) assert.notEqual(launch(args, dir).status, 0);
   assert.ok(!fs.existsSync(path.join(dir, '.env')));
   assert.ok(!fs.existsSync(path.join(dir, '.local')));
@@ -57,6 +58,23 @@ test('installed-style init discovers nested projects and preserves environment o
   r = launch(['-C', dir, 'init'], os.tmpdir());
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(fs.readFileSync(path.join(dir, '.env')), before);
+});
+
+test('init honors template passwords and keeps them out of JSON output', t => {
+  const dir = project(t), filename = path.join(dir, '.env.example');
+  const passwords = {PGPASSWORD: 'template-pg', ODOO_MASTER_PASSWORD: 'template-master', ODOO_ADMIN_PASSWORD: 'template-admin'};
+  let template = fs.readFileSync(filename, 'utf8');
+  for (const [key, value] of Object.entries(passwords)) template = template.replace(new RegExp('^' + key + '=.*$', 'm'), key + '=' + value);
+  fs.writeFileSync(filename, template);
+  const r = launch(['init', '--json'], dir);
+  assert.equal(r.status, 0, r.stderr);
+  const body = fs.readFileSync(path.join(dir, '.env'), 'utf8');
+  for (const [key, value] of Object.entries(passwords)) {
+    assert.ok(body.includes(key + '=' + value));
+    assert.ok(!r.stdout.includes(key));
+    assert.ok(!r.stdout.includes(value));
+    assert.ok(!r.stderr.includes(value));
+  }
 });
 
 test('down preview is project-scoped, exposes volume deletion and has no side effects', t => {

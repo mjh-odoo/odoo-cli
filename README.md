@@ -77,7 +77,11 @@ odoo help exec                        # 查看管理工具的转发说明
 
 ## 配置与数据
 
-项目使用 `.env + compose.yaml + config/`。`init` 只在缺少 `.env` 时生成独立项目身份、可用端口和随机密码；重复运行保留已有文件。不同代码目录（包括 Git 工作树）默认使用不同身份、端口和数据卷。手动复制 `.env` 时需自行调整这些值。
+项目使用 `.env + compose.yaml + config/`。`init` 只在缺少 `.env` 时生成独立项目身份与可用端口；三个密码沿用 `.env.example` 中的非空值，只有空项才随机生成；重复运行保留已有文件。不同代码目录（包括 Git 工作树）默认使用不同身份、端口和数据卷。手动复制 `.env` 时需自行调整这些值。
+
+密码字段为 `PGPASSWORD`（PostgreSQL 连接）、`ODOO_MASTER_PASSWORD`（数据库管理）和 `ODOO_ADMIN_PASSWORD`（空库管理员初始密码）。`PGUSER`、`PGDATABASE`、`ODOO_ADMIN_LOGIN` 及普通参数继续沿用模板。模板中的 `PROJECT_NAME` 和三个宿主端口保持空白，由 init 按目录分配；人工固定时修改生成后的 `.env`。
+
+修改模板不更新已有 `.env` 或重置现有账号。管理员初始密码只用于空库；PostgreSQL 密码需与已有角色一致。真实密码放忽略的 `.env`，模板只填写可共享的开发默认值。此规则从本地 0.1.1 候选加入，npm 0.1.0 尚未包含。
 
 `module install/update` 先停止 Odoo，使用一次性维护容器，再启动服务；失败时保留停止状态供排查。`-d` 只覆盖本次维护的目标库，不修改 `.env`。
 

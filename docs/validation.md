@@ -33,3 +33,11 @@ python3 test/docker-acceptance.py /absolute/path/to/base /absolute/path/to/insta
 ## 平台边界
 
 GitHub CI 在 Windows、macOS、Linux 的 Node 24 上运行单元测试及打包安装检查；最终结果以发布提交的 Actions 为准。Windows 原生 Docker、WSL 及 Linux Docker 尚未实测。基础镜像与完整 base 均未在本次 CLI 发布中上传。
+
+## 0.1.1 本地候选：模板密码
+
+2026-11-03，首次 init 保留 .env.example 中 PGPASSWORD、ODOO_MASTER_PASSWORD、ODOO_ADMIN_PASSWORD 的非空值，仅空项生成；项目身份和宿主端口仍按目录自动分配。现有 .env 完整保留，模板变化不重置数据库用户。
+
+本机 40 项 Node 测试通过。npm pack 离线打包并安装至独立临时前缀后，实际 odoo 0.1.1 的版本、帮助、固定密码、部分随机及重复 init 均通过；JSON 输出不包含密码字段和值。使用临时项目解析真实 Base Compose，核对三个密码的传递结果，包含带 # 和字面量 $ 的值；没有启动测试数据库或操作既有卷。包清单仅保留允许的源码、文档和许可等 12 个文件，无源码仓库、.env、测试夹具或数据。
+
+本轮未发布 npm、未推送远端或创建标签；npm 已发布版本仍为 0.1.0。跨平台 CI 尚未运行本候选，换行格式只通过本机回归验证。

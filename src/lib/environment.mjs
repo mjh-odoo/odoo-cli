@@ -55,16 +55,18 @@ export async function prepareEnv(root) {
     if ((await Promise.all(candidate.map(portFree))).every(Boolean)) { ports = candidate; break; }
   }
   if (!ports) throw new Error('No free host port set found.');
-  Object.assign(values, {
+  const generated = {
     PROJECT_NAME: name, DB_PORT: String(ports[0]), ODOO_HTTP_PORT: String(ports[1]), ODOO_GEVENT_PORT: String(ports[2]),
-    PGPASSWORD: crypto.randomBytes(24).toString('hex'),
-    ODOO_MASTER_PASSWORD: crypto.randomBytes(24).toString('hex'),
-    ODOO_ADMIN_PASSWORD: crypto.randomBytes(24).toString('hex'),
-  });
-  validateEnv(values);
-  for (const key of ['PROJECT_NAME', 'DB_PORT', 'ODOO_HTTP_PORT', 'ODOO_GEVENT_PORT', 'PGPASSWORD', 'ODOO_MASTER_PASSWORD', 'ODOO_ADMIN_PASSWORD']) {
-    const pattern = new RegExp('^' + key + '=.*$', 'm');
-    text = text.replace(pattern, key + '=' + values[key]);
+  };
+  for (const key of ['PGPASSWORD', 'ODOO_MASTER_PASSWORD', 'ODOO_ADMIN_PASSWORD']) {
+    if (!values[key]) generated[key] = crypto.randomBytes(24).toString('hex');
+  }
+  validateEnv({...values, ...generated});
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  for (const [key, value] of Object.entries(generated)) {
+    const pattern = new RegExp('^[ \t]*(?:export[ \t]+)?' + key + '[ \t]*=[^\r\n]*', 'gm');
+    if (pattern.test(text)) text = text.replace(pattern, () => key + '=' + value);
+    else text += (text && !text.endsWith('\n') ? newline : '') + key + '=' + value + newline;
   }
   try { fs.writeFileSync(filename, text, {flag: 'wx', mode: 0o600}); }
   catch (error) { if (error.code !== 'EEXIST') throw error; }
