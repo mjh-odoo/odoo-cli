@@ -86,7 +86,7 @@ test('template passwords and ordinary defaults are preserved without reserializi
   const output = fs.readFileSync(path.join(root, '.env'), 'utf8');
   for (const [key, {line, value}] of Object.entries(settings)) {
     assert.equal(values[key], value);
-    assert.ok(output.split('\n').includes(line));
+    assert.ok(output.split(/\r?\n/).includes(line));
   }
   assert.equal(fs.readFileSync(filename, 'utf8'), template);
 });
