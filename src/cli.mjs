@@ -1,9 +1,15 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseEnv } from 'node:util';
 import { Command, Option, InvalidArgumentError } from 'commander';
 import { findProject, openProject, databaseName, runDocker, projectVersion } from './project.mjs';
 import { readEnv } from './lib/environment.mjs';
 import { parseLogOptions, executeLogs } from './lib/logs.mjs';
 import { imageBuildPlan, executeImageBuild } from './lib/image.mjs';
+import { archivedWorktrees, cleanArchivedWorktree } from './archived-worktrees.mjs';
+import { exportLibrary, importLibrary } from './archive-library.mjs';
 import * as commands from './commands.mjs';
+import { archiveDefault, archiveList, archiveTag, archiveTags, deleteArchive, tagName, archiveSeed, startupSeed } from './archive.mjs';
 
 function integer(value) {
   if (!/^\d+$/.test(value) || +value > 3600) throw new InvalidArgumentError('请输入 0..3600 的整数。');
@@ -71,10 +77,91 @@ export function createProgram({version, cwd = process.cwd(), runner = runDocker}
 
   const db = program.command('db').description('数据库查询及标准 ZIP 备份恢复');
   db.command('list').description('列出项目 PostgreSQL 中的数据库').option('--json', '输出 JSON；current 表示当前配置的数据库').action(async options => commands.listDatabases(await context(false), options));
-  databaseOption(db.command('backup').description('导出数据库及附件 ZIP').option('--file <path>', '输出路径；默认保存到工作树之外')).action(async options => commands.backup(await context(false), options));
-  databaseOption(db.command('restore').description('恢复 ZIP，默认中和外发任务').requiredOption('--file <path>', '已有的 Odoo 20 ZIP')
-    .option('--force', '允许覆盖已有目标数据库').option('--no-restart', '恢复后保持 Odoo 停止')).action(async options => commands.restore(await context(false), options));
+  databaseOption(db.command('backup').description('导出数据库及附件 ZIP')
+    .addOption(new Option('--file <path>', '输出到指定路径').conflicts('name'))
+    .option('--name <title>', '按名称保存到 Odoo Manager 存档库').option('--note <text>', '存档备注（与 --name 一起使用）')
+    .option('--json', '输出存档 JSON（与 --name 一起使用）')).action(async options => {
+    if (options.name === undefined && (options.note !== undefined || options.json)) throw new Error('--note 和 --json 需要 --name。');
+    await commands.backup(await context(false), options);
+  });
+  databaseOption(db.command('restore').description('恢复 Odoo ZIP，默认中和外发任务')
+    .argument('[reference]', '本项目的标签或存档 ID')
+    .option('--to <name>', '恢复目标库', databaseName)
+    .option('--use', '恢复成功后切换到新库')
+    .addOption(new Option('--file <path>', '已有的 Odoo 20 ZIP').conflicts('archive'))
+    .option('--archive <reference>', '兼容入口，指定项目存档')
+    .option('--force', '允许覆盖已有目标数据库').option('--no-restart', '恢复后保持 Odoo 停止')).action(async (reference, options) => {
+    if ([reference, options.file, options.archive].filter(Boolean).length !== 1) throw new Error('请指定标签、存档 ID 或 --file <path>。');
+    if (options.to && options.database) throw new Error('请选择 --to 或 --database 中的一个。');
+    const database = options.to || options.database;
+    if ((reference || options.use) && !database) throw new Error('请用 --to 指定新的目标数据库名称。');
+    if (options.use && options.force) throw new Error('恢复并切换需要一个新库，不能同时指定 --force。');
+    await commands.restore(await context(false), {...options, archive: reference || options.archive, database, legacy: !reference});
+  });
+  db.command('recover').description('清理本次恢复产生的残留库').option('--yes', '确认清理')
+    .action(async options => {
+      if (!options.yes) throw new Error('清理恢复残留需要 --yes。');
+      await commands.recoverDatabase(await context(false));
+    });
+  db.command('use').description('切换当前环境使用的数据库').argument('<database>', '已有数据库', databaseName)
+    .action(async name => commands.useDatabase(await context(false), name));
+  db.command('delete').description('删除指定数据库及其附件')
+    .argument('<database>', '目标数据库', databaseName).option('--yes', '确认删除')
+    .action(async (name, options) => {
+      if (!options.yes) throw new Error('删除数据库及附件需要 --yes。');
+      await commands.deleteDatabase(await context(false), name);
+    });
   db.action(() => db.help());
+
+  const archive = program.command('archive').description('管理项目数据库存档');
+  archive.command('seed').description('查看或设置项目的首次启动数据来源')
+    .argument('[reference]', 'tag:<标签>、id:<存档ID> 或 empty').option('--json', '输出 JSON')
+    .action((reference, options) => archiveSeed(root(), reference, options));
+  archive.command('source').description('预览当前环境首次启动的数据来源')
+    .action(async () => {
+      const directory = root();
+      const values = fs.existsSync(path.join(directory, '.env')) ? readEnv(directory) : parseEnv(fs.readFileSync(path.join(directory, '.env.example'), 'utf8'));
+      console.log(JSON.stringify(await startupSeed(directory, values, true)));
+    });
+  archive.command('list').description('列出本项目的存档、标签和 ID').option('--json', '输出 JSON').action(options => archiveList(root(), options));
+  databaseOption(archive.command('save').description('保存当前环境的 Odoo ZIP').argument('<title>', '存档名称')
+    .option('--note <text>', '存档备注').option('--tag <name>', '保存成功后创建或移动标签', tagName).option('--json', '输出 JSON'))
+    .action(async (name, options) => commands.backup(await context(false), {...options, name}));
+  archive.command('import').description('校验并导入 Odoo ZIP').argument('<file>', 'ZIP 文件')
+    .option('--name <title>', '存档名称').option('--json', '输出 JSON')
+    .action(async (file, options) => commands.importArchive(await context(true), file, options));
+  archive.command('delete').description('删除存档 ZIP').argument('<id>', '存档 ID').option('--yes', '确认删除')
+    .action((id, options) => {
+      if (!options.yes) throw new Error('删除存档 ZIP 需要 --yes。');
+      return deleteArchive(root(), id);
+    });
+  archive.command('default', {hidden: true}).argument('[id]').action(id => archiveDefault(root(), id));
+  const library = archive.command('library').description('迁移项目存档、标签和备注');
+  library.command('export').argument('<directory>', '新建的导出目录').description('导出项目存档库')
+    .action(async directory => console.log(JSON.stringify(await exportLibrary(root(), directory))));
+  library.command('import').argument('<directory>', '存档库目录').description('导入项目存档库')
+    .action(async directory => console.log(JSON.stringify(await importLibrary(root(), directory))));
+  library.action(() => library.help());
+  const tag = archive.command('tag').description('管理项目存档标签');
+  tag.command('list').description('列出标签及指向的存档').option('--json', '输出 JSON').action(options => archiveTags(root(), options));
+  tag.command('set').description('创建或移动标签').argument('<tag>').argument('<id>', '存档 ID').action((name, id) => archiveTag(root(), name, id));
+  tag.command('remove').description('移除标签').argument('<tag>').action(name => archiveTag(root(), name));
+  tag.action(() => tag.help());
+  archive.action(() => archive.help());
+
+  const worktree = program.command('worktree').description('查看已归档工作树的本地数据');
+  const runLocalDocker = (directory, args) => runner(args, {root: directory, env: process.env, capture: true});
+  worktree.command('archived').description('列出已归档工作树和数据卷').action(async () => {
+    const directory = root();
+    console.log(JSON.stringify(await archivedWorktrees(directory, args => runLocalDocker(directory, args))));
+  });
+  worktree.command('clean').description('删除已归档工作树的数据库和附件卷')
+    .argument('<compose-project>').option('--yes', '确认删除').action(async (project, options) => {
+      if (!options.yes) throw new Error('清理归档数据卷需要 --yes。');
+      const directory = root();
+      console.log(JSON.stringify(await cleanArchivedWorktree(directory, project, args => runLocalDocker(directory, args))));
+    });
+  worktree.action(() => worktree.help());
 
   const image = program.command('image').description('构建基础镜像、项目镜像和离线包');
   image.command('build').description('默认构建本地基础镜像')

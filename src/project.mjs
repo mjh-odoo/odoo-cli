@@ -54,20 +54,43 @@ export async function openProject(root, {initialize = false, runner = runDocker}
   const compose = ['compose', '--file', path.join(root, 'compose.yaml'), '--project-directory', root, '--env-file', path.join(root, '.env'), '--project-name', values.PROJECT_NAME];
   const docker = (args, io = {}) => runner(args, {root, env, ...io});
   const run = (args, io) => docker([...compose, ...args], io);
-  return {root, values, env, compose, docker, run};
+  return {root, values, env, compose, docker, run, runner};
+}
+
+function deadOwner(lock) {
+  try {
+    const {pid} = JSON.parse(fs.readFileSync(path.join(lock, 'owner.json'), 'utf8'));
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    process.kill(pid, 0);
+  } catch (error) { return error.code === 'ESRCH'; }
+  return false;
 }
 
 export async function withLock(ctx, action) {
-  const lock = path.join(ctx.root, '.local', 'operation.lock');
-  fs.mkdirSync(path.dirname(lock), {recursive: true});
+  const local = path.join(ctx.root, '.local');
+  const lock = path.join(local, 'operation.lock');
+  const reclaim = path.join(local, 'operation.reclaim');
+  fs.mkdirSync(local, {recursive: true});
   try { fs.mkdirSync(lock); }
   catch (error) {
-    if (error.code === 'EEXIST') throw new Error('本项目存在进行中的维护操作。若操作曾中断，请先核对 .local/operation.lock/owner.json 中的进程，再清理过期锁。');
-    throw error;
+    if (error.code !== 'EEXIST') throw error;
+    const busy = '本项目有进行中的操作。若操作已中断，请检查 .local/operation.lock/owner.json。';
+    if (!deadOwner(lock)) throw new Error(busy);
+    try { fs.mkdirSync(reclaim); }
+    catch (error) { if (error.code === 'EEXIST') throw new Error(busy); throw error; }
+    try {
+      if (fs.existsSync(lock)) {
+        if (!deadOwner(lock)) throw new Error(busy);
+        fs.rmSync(lock, {recursive: true});
+      }
+      try { fs.mkdirSync(lock); }
+      catch (error) { if (error.code === 'EEXIST') throw new Error(busy); throw error; }
+    } finally { fs.rmdirSync(reclaim); }
   }
-  fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({pid: process.pid, started: new Date().toISOString()}), {mode: 0o600});
-  try { return await action(); }
-  finally { fs.rmSync(lock, {recursive: true, force: true}); }
+  try {
+    fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({pid: process.pid, started: new Date().toISOString()}), {mode: 0o600});
+    return await action();
+  } finally { fs.rmSync(lock, {recursive: true, force: true}); }
 }
 
 export function projectVersion(root) {

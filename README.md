@@ -43,7 +43,25 @@ odoo down
 
 日志默认有限快照，持续查看才加 -f；JSON、筛选和文件导出不能与 -f 混用。异常保留上下文，空结果不代表服务无故障。
 
-普通 down 保留卷；只有明确要删除本项目数据库与附件时使用 -v，可先 --dry-run 看计划。恢复已有目标库需要显式 --force；恢复到新名字不会切换默认运行库。备份默认保存在工作树外，odoo config 显示位置。
+普通 down 保留卷；只有明确要删除本项目数据库与附件时使用 -v，可先 --dry-run 看计划。恢复已有目标库需要显式 --force；加 `--use` 可以在成功恢复到新库后切换。备份默认保存在工作树外，odoo config 显示位置。
+
+## 与 Odoo Manager 共用存档
+
+在 Odoo Manager 接入项目并设置存档目录后，可以在主目录或任意 Git 工作树中执行：
+
+```sh
+odoo archive save "销售验收版" --tag latest
+odoo archive import /path/to/backup.zip
+odoo archive list --json
+odoo archive tag set latest <archive-id>
+odoo db restore latest --to sales_review --use
+```
+
+桌面端和 CLI 共用存档及标签。标签在命令执行时解析，也可用 `id:<存档ID>` 固定版本。发布只移动标签，已有环境的数据由该环境自行维护。`db use` 更新当前环境的 `PGDATABASE` 并重启原本运行中的 Odoo，原库保留。用 `archive delete <ID> --yes` 删除无标签的 ZIP，用 `db delete <库名> --yes` 删除已切走的数据库和附件。
+
+在新工作树的 `.env` 配置 `ODOO_SEED=tag:latest` 与 `ODOO_SEED_MODE=first-start`，首次 `odoo up` 会从标签恢复到空库，然后启动 Odoo。可在 `.env.example` 预填，使新工作树的 `odoo init` 一起复制配置。默认 `manual`。
+
+`odoo archive seed tag:latest` 为已接入项目设置工作树的首次数据来源，`odoo archive source` 预览。恢复被中断后可用 `odoo db recover --yes` 清理本次创建的残留库。用 `odoo archive library export <新目录>` 和 `odoo archive library import <目录>` 迁移存档及标签。用 `odoo worktree archived` 查看已归档工作树的数据卷。
 
 ## 镜像与官方命令
 

@@ -11,7 +11,10 @@ export function readEnv(root) {
 }
 
 export function projectName(root) {
-  const location = fs.realpathSync(root);
+  return projectNameForPath(fs.realpathSync(root));
+}
+
+export function projectNameForPath(location) {
   const prefix = path.basename(location).toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^[_-]+/, '') || 'odoo';
   return prefix.slice(0, 32) + '_' + crypto.createHash('sha256').update(location).digest('hex').slice(0, 10);
 }
@@ -32,6 +35,10 @@ export function validateEnv(values) {
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(values.PROJECT_NAME)) throw new Error('Invalid PROJECT_NAME.');
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(values.PGDATABASE)) throw new Error('Invalid PGDATABASE.');
   if (!['DEV', 'TEST', 'PROD'].includes(values.ENV)) throw new Error('ENV must be DEV, TEST or PROD.');
+  if (values.ODOO_SEED_MODE && !['manual', 'first-start', 'empty'].includes(values.ODOO_SEED_MODE)) throw new Error('ODOO_SEED_MODE 仅支持 manual、first-start 或 empty。');
+  if (values.ODOO_SEED && !/^(?:tag:[a-z][a-z0-9._-]{0,63}|id:[a-zA-Z0-9_-]{1,100})$/.test(values.ODOO_SEED)) throw new Error('ODOO_SEED 请填写 tag:latest 或 id:<存档ID>。');
+  if (values.ENV === 'PROD' && values.ODOO_SEED && values.ODOO_SEED_MODE === 'first-start') throw new Error('首次加载存档仅用于开发和测试环境。');
+
   const ports = ['DB_PORT', 'ODOO_HTTP_PORT', 'ODOO_GEVENT_PORT'].map(key => {
     const value = values[key];
     if (!/^\d+$/.test(value || '') || +value < 1 || +value > 65535) throw new Error('Invalid ' + key + '.');
