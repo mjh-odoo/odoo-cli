@@ -20,7 +20,7 @@ export function parseLogOptions(args) {
     follow: {type: 'boolean', short: 'f', default: false},
     tail: {type: 'string', short: 'n', default: '200'},
     since: {type: 'string'}, until: {type: 'string'}, level: {type: 'string'},
-    match: {type: 'string'}, context: {type: 'string'},
+    match: {type: 'string'}, context: {type: 'string'}, 'hide-health': {type: 'boolean', default: false},
     json: {type: 'boolean', default: false}, file: {type: 'string'},
   }});
   const services = [...new Set((positionals.length ? positionals : ['odoo']).flatMap(service => service === 'all' ? ['odoo', 'db'] : [service]))];
@@ -32,7 +32,7 @@ export function parseLogOptions(args) {
   if (values.match !== undefined && (!values.match.trim() || /[\r\n]/.test(values.match))) throw new Error('--match 需要非空的单行文本。');
   if (values.context !== undefined && (!/^\d+$/.test(values.context) || +values.context > 100)) throw new Error('--context 必须为 0..100。');
   if (values.file !== undefined && !values.file.trim()) throw new Error('--file 需要输出文件路径。');
-  if (values.follow && (level || values.match || values.context !== undefined || values.json || values.file)) throw new Error('级别、关键词、上下文、JSON 和文件导出用于快照；持续跟随请单独使用 -f。');
+  if (values.follow && (level || values.match || values.context !== undefined || values['hide-health'] || values.json || values.file)) throw new Error('级别、关键词、上下文、JSON 和文件导出用于快照；持续跟随请单独使用 -f。');
   return {...values, level, services, context: +(values.context ?? 2), file: values.file ? path.resolve(values.file) : undefined};
 }
 
@@ -83,6 +83,23 @@ export function parseLogEvents(lines) {
   for (const key of pending.keys()) flush(key);
   events.sort((a, b) => (Date.parse(a.timestamp) - Date.parse(b.timestamp)) || a.index - b.index);
   return {events: events.map(({messages, ...event}) => ({...event, message: messages.join('\n')})), diagnostics};
+}
+
+function isSuccessfulHealthCheck(event) {
+  return event.service === 'odoo' && event.level === 'info' && event.lines.length === 1 &&
+    (event.logger === 'odoo.http.server' || event.logger === 'werkzeug') &&
+    /"(?:GET|HEAD) \/web\/health(?:\?[^"\s]*)? HTTP\/\d+(?:\.\d+)?"\s+2\d{2}(?:\s|$)/.test(event.message);
+}
+
+function reachedTail(events, tail) {
+  if (tail === 'all' || Number(tail) === 0) return false;
+  const counts = new Map();
+  for (const event of events) {
+    const count = (counts.get(event.container) || 0) + event.lines.length;
+    if (count >= Number(tail)) return true;
+    counts.set(event.container, count);
+  }
+  return false;
 }
 
 export function selectLogEvents(events, options) {
@@ -158,14 +175,15 @@ export async function executeLogs(options, {root, env, values, compose, read = d
   // must not change service attribution or severity detection.
   const {events, diagnostics: rawDiagnostics} = parseLogEvents(result.lines.map(line => stripVTControlCharacters(line)));
   const diagnostics = rawDiagnostics.map(mask);
-  const selection = selectLogEvents(events, options);
+  const candidates = options['hide-health'] ? events.filter(event => !isSuccessfulHealthCheck(event)) : events;
+  const selection = selectLogEvents(candidates, options);
   const selected = {matched: selection.matched, events: selection.events.map(event => ({
     ...event, message: mask(event.message), lines: event.lines.map(maskLine),
     ...(event.logger ? {logger: mask(event.logger)} : {}),
     ...(event.database ? {database: mask(event.database)} : {}),
   }))};
   const exported = selected.events.map(({lines, index, ...event}) => event);
-  const payload = {project: values.PROJECT_NAME, services: options.services, query: {tail: options.tail, since: options.since, until: options.until, level: options.level, match: options.match ? mask(options.match) : undefined, context: options.context}, scanned: events.length, matched: selected.matched, shown: exported.length, diagnostics, events: exported};
+  const payload = {project: values.PROJECT_NAME, services: options.services, query: {tail: options.tail, since: options.since, until: options.until, level: options.level, match: options.match ? mask(options.match) : undefined, context: options.context, hideHealth: options['hide-health']}, scanned: events.length, hiddenHealth: events.length - candidates.length, tailReached: reachedTail(events, options.tail), matched: selected.matched, shown: exported.length, diagnostics, events: exported};
   const output = options.json ? JSON.stringify(payload, null, 2) + '\n' : selected.events.flatMap(event => event.lines).join('\n') + (selected.events.length ? '\n' : '');
   if (!options.json) for (const line of diagnostics) stderr.write(line + '\n');
   if (options.file) {

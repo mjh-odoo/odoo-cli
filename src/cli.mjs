@@ -18,7 +18,7 @@ function argumentsFor(options, names) {
   return names.flatMap(name => {
     const key = name.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     const value = options[key];
-    return value === true ? ['--' + name] : value === undefined || value === false ? [] : ['--' + name, String(value)];
+    return value === true ? ['--' + name] : value === undefined || value === false ? [] : ['--' + name + '=' + String(value)];
   });
 }
 
@@ -52,10 +52,10 @@ export function createProgram({version, cwd = process.cwd(), runner = runDocker}
     .option('-f, --follow', '持续查看，Ctrl+C 只退出查看').option('-n, --tail <lines>', '每容器行数，支持 0 或 all', '200')
     .option('--since <time>', '起始时间，如 10m 或带时区 RFC3339').option('--until <time>', '截止时间')
     .option('--level <level>', '最低级别：debug/info/warning/error/critical').option('--match <text>', '不区分大小写的字面筛选')
-    .option('--context <events>', '筛选结果前后事件数，默认 2').option('--json', '输出完整 JSON 快照').option('--file <path>', '保存快照，拒绝覆盖已有文件');
+    .option('--hide-health', '隐藏成功的 Odoo 健康检查').option('--context <events>', '筛选结果前后事件数，默认 2').option('--json', '输出完整 JSON 快照').option('--file <path>', '保存快照，拒绝覆盖已有文件');
   logs.addHelpText('after', '\n筛选、JSON 和文件用于有限快照，不能与 -f 同用。保留完整异常堆栈；--tail 起点仍可能截到异常中间。');
   logs.action(async (services, options) => {
-    const parsed = parseLogOptions([...(services || []), ...argumentsFor(options, ['follow', 'tail', 'since', 'until', 'level', 'match', 'context', 'json', 'file'])]);
+    const parsed = parseLogOptions([...(services || []), ...argumentsFor(options, ['follow', 'tail', 'since', 'until', 'level', 'match', 'context', 'hide-health', 'json', 'file'])]);
     process.exitCode = await executeLogs(parsed, await context(false));
   });
 

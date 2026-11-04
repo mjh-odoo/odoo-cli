@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLogOptions, logArguments, parseLogEvents, selectLogEvents, secretMask } from '../src/lib/logs.mjs';
+import { parseLogOptions, logArguments, parseLogEvents, selectLogEvents, secretMask, executeLogs } from '../src/lib/logs.mjs';
 
 const row = (service, n, text) => `${service}-1  | 2026-11-03T01:00:${String(n).padStart(2, '0')}.000000000Z ${text}`;
 const lines = [
@@ -31,7 +31,7 @@ test('logs default to a finite timestamped snapshot with explicit service select
 });
 
 test('unsupported inputs and snapshot-only options fail before Docker or file creation', () => {
-  for (const args of [['unknown'], ['--tail', '-1'], ['--tail', '100001'], ['--since', 'yesterday'], ['--since', '2026-11-03'], ['--level', 'broken'], ['--match', ''], ['--context', '101'], ['--unknown'], ['-f', '--json'], ['-f', '--level', 'error'], ['-f', '--file', 'x']]) assert.throws(() => parseLogOptions(args));
+  for (const args of [['unknown'], ['--tail', '-1'], ['--tail', '100001'], ['--since', 'yesterday'], ['--since', '2026-11-03'], ['--level', 'broken'], ['--match', ''], ['--context', '101'], ['--unknown'], ['-f', '--json'], ['-f', '--level', 'error'], ['-f', '--hide-health'], ['-f', '--file', 'x']]) assert.throws(() => parseLogOptions(args));
 });
 
 test('Python tracebacks and PostgreSQL statement context survive interleaved services', () => {
@@ -72,3 +72,37 @@ test('known secrets and ANSI escapes are removed using literal values', () => {
   assert.equal(mask(`\x1b[31m${secret} ${encodeURIComponent(secret)}\x1b[0m`), '[REDACTED] [REDACTED]');
 });
 
+
+test('hiding health checks preserves failures and keeps useful context within the scanned window', async () => {
+  const http = (n, route, status) => row('odoo', n, `2026-11-03 01:00:00,000 1 INFO demo odoo.http.server: 127.0.0.1 "GET ${route} HTTP/1.1" ${status} 5`);
+  const source = [
+    http(0, '/web/health?db_server_status=1', 200),
+    http(1, '/web/health', 503),
+    http(2, '/web/health/details', 200),
+    row('odoo', 3, '2026-11-03 01:00:03,000 1 ERROR demo odoo.addons.demo: failed'),
+    row('odoo', 4, 'Traceback (most recent call last):'),
+    row('odoo', 5, 'ValueError: bad input'),
+    http(6, '/web/health', 204),
+    row('db', 7, '2026-11-03 01:00:07.000 UTC [23] LOG: checkpoint'),
+  ];
+  async function snapshot(args) {
+    let output;
+    await executeLogs(parseLogOptions(['all', '--json', ...args]), {
+      values: {PROJECT_NAME: 'test'}, compose: ['compose'], read: async () => ({lines: source}),
+      stdout: {write: text => { output = text; }},
+    });
+    return JSON.parse(output);
+  }
+  const result = await snapshot(['--hide-health', '--tail', '7', '--level', 'error', '--context', '1']);
+  assert.equal(result.hiddenHealth, 2);
+  assert.equal(result.tailReached, true);
+  assert.equal(result.matched, 1);
+  assert.deepEqual(result.events.map(event => event.context), [true, false, true]);
+  assert.match(result.events[0].message, /health\/details/);
+  assert.match(result.events[1].message, /ValueError: bad input/);
+  assert.equal(result.events[2].service, 'db');
+  const visible = await snapshot(['--hide-health']);
+  assert.match(visible.events[0].message, /503/);
+  assert.equal(visible.tailReached, false);
+  assert.equal((await snapshot([])).hiddenHealth, 0);
+});

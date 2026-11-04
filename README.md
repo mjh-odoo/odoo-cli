@@ -29,7 +29,7 @@ odoo up
 odoo up --no-build --pull never --wait-timeout 600
 odoo status --json
 odoo logs all --since 10m --json
-odoo logs all --since 10m --level error --context 3 --json
+odoo logs all --since 10m --tail 1000 --level error --context 3 --hide-health --json
 odoo module list --json
 odoo module install first_module second_module
 odoo module update first_module second_module -d target_db
